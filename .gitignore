@@ -1,0 +1,8 @@
+*.c
+*.csv
+*.h5
+*.log
+*.o
+*.pyc
+*.so
+*.xdmf
