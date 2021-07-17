@@ -9,24 +9,19 @@ RANKS = 4
 
 # Container Settings
 
-IMAGE = fenics/stable
+IMAGE = quay.io/fenicsproject/stable
 NAME = pfhub
 
 # Make Targets
 
 all: fenics-bm-1b.xdmf
-.PHONY: all clean instance list shell spinodal stop watch
+.PHONY: all clean shell start stop watch
 
 fenics-bm-1b.xdmf: spinodal.py
-	make instance
-	make spinodal
-	make stop
+	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py
 
 clean:
-	rm -vf *spinodal.h5 *spinodal.xdmf *spinodal.log fenics*.csv
-
-instance:
-	singularity instance start -H $(PWD) docker://$(IMAGE) $(NAME)
+	rm -vf *.csv *.h5 *.log *.xdmf
 
 list:
 	singularity instance list
@@ -34,8 +29,8 @@ list:
 shell:
 	singularity exec instance://$(NAME) bash --init-file .singular-prompt
 
-spinodal: spinodal.py
-	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py
+start:
+	singularity instance start -H $(PWD) docker://$(IMAGE) $(NAME)
 
 stop:
 	singularity instance stop $(NAME)

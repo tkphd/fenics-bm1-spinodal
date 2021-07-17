@@ -1,8 +1,11 @@
 *.c
+.cache
 *.csv
 *.h5
 *.log
 *.o
+*.pvd
 *.pyc
 *.so
+*.vtu
 *.xdmf
