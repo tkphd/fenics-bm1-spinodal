@@ -98,19 +98,20 @@ class InitialConditions(UserExpression):
 
 
 def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, r, τ):
+    𝑛 = len(𝛀.coordinates())
     𝒎 = assemble(𝑐 * Δ𝑥)
     𝓕 = assemble(𝜌 * (𝑐 - 𝛼)**2 * (𝛽 - 𝑐)**2 * Δ𝑥) \
       + assemble(0.5 * 𝜅 * dot(grad(𝑐), grad(𝑐)) * Δ𝑥)
-    𝜂 = assemble(np.abs(𝜇 - 𝜆) * Δ𝑥)
-    𝑛 = COMM.allreduce(len(𝛀.coordinates()), op=MPI.SUM)
+    𝜂 = assemble(np.abs(𝜇 - 𝜆)/𝑛 * Δ𝑥)
+    # 𝑛 = COMM.allreduce(len(𝛀.coordinates()), op=MPI.SUM)
 
-    𝐜 = COMM.allreduce(𝒎 / 𝑛, op=MPI.SUM)
-    𝐅 = COMM.allreduce(𝓕, op=MPI.SUM)
-    𝛈 = COMM.allreduce(𝜂 / 𝑛, op=MPI.SUM)
-    𝐫 = COMM.allreduce(r, op=MPI.MAX)
+    #𝐜 = COMM.allreduce(𝒎 / 𝑛, op=MPI.SUM)
+    #𝐅 = COMM.allreduce(𝓕, op=MPI.SUM)
+    #𝛈 = COMM.allreduce(𝜂 / 𝑛, op=MPI.SUM)
+    #𝐫 = COMM.allreduce(r, op=MPI.MAX)
     𝛕 = MPI.Wtime() - τ
 
-    return (𝑡, 𝐜, 𝐅, 𝛈, 𝐫, 𝛕)
+    return (𝑡, 𝒎, 𝓕, 𝜂, 𝐫, 𝛕)
 
 
 def print0(s):
