@@ -96,15 +96,16 @@ class InitialConditions(UserExpression):
         return (2, )
 
 
-def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, r, τ):
+def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, i, τ):
     𝑛 = len(𝛀.coordinates())
-    𝒎 = assemble(𝑐 * Δ𝑥)
+    𝐦 = assemble(𝑐 * Δ𝑥) / 𝑊**2
     𝐅 = assemble(𝜌 * (𝑐 - 𝛼)**2 * (𝛽 - 𝑐)**2 * Δ𝑥) \
       + assemble(0.5 * 𝜅 * dot(grad(𝑐), grad(𝑐)) * Δ𝑥)
     𝛈 = assemble(np.abs(𝜇 - 𝜆) / 𝑛 * Δ𝑥)
+    𝐢 = COMM.allreduce(i, op=MPI.MAX)
     𝛕 = MPI.Wtime() - τ
 
-    return (𝑡, 𝒎 / 𝑊**2, 𝐅, 𝛈, 𝐫, 𝛕)
+    return (𝑡, 𝐦, 𝐅, 𝛈, 𝐢, 𝛕)
 
 
 def print0(s):
@@ -225,28 +226,33 @@ except IOError as e:
 # === TIMESTEPPING ===
 
 # Enqueue output timestamps
-io_q = queue.Queue()
+viz_q = queue.Queue()
+nrg_q = queue.Queue()
 
-io_q.put(1.0)
-io_q.put(2.0)
-io_q.put(5.0)
+for t_out in (1, 2, 5):
+    viz_q.put(int(t_out))
+    nrg_q.put(int(t_out))
 for n in np.arange(1, 7):
     for m in np.arange(1, 10):
+        t_viz = int(m * 10.0**n)
+        if t_viz <= 𝑇:
+            viz_q.put(t_viz)
         for l in np.arange(-1, 2, 1):
-            t_out = l + m * 10.0**n
-            if t_out <= 𝑇:
-                io_q.put(t_out)
+            t_nrg = int(l + t_viz)
+            if t_nrg <= 𝑇:
+                nrg_q.put(t_nrg)
 
 start = MPI.Wtime()
 
 write_csv_header(bm1_log)
 
 Δ𝜇 = 1.0
-io_t = io_q.get()
 converged = True
+viz_t = viz_q.get()
+nrg_t = nrg_q.get()
 
 print0("[{}] Next summary at 𝑡={}".format(
-    timedelta(seconds=(MPI.Wtime() - epoch)), io_t))
+    timedelta(seconds=(MPI.Wtime() - epoch)), viz_t))
 write_csv_summary(bm1_log, crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, 0, start))
 
 while (converged) and (Δ𝜇 > 1e-8) and (𝑡 < 𝑇):
@@ -255,21 +261,24 @@ while (converged) and (Δ𝜇 > 1e-8) and (𝑡 < 𝑇):
 
     i, converged = solver.solve(problem, 𝒖.vector())
 
-    if np.isclose(𝑡, io_t) or 𝑡 > io_t:
-        # write visualization checkpoints
+    if np.isclose(𝑡, nrg_t) or 𝑡 > nrg_t:
+        # write free energy summary
+        write_csv_summary(bm1_log, crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, i, start))
+        nrg_t = nrg_q.get()
+
+    if np.isclose(𝑡, viz_t) or 𝑡 > viz_t:
+        # write visualization checkpoint
         try:
             for i, f in enumerate(𝒖.split()):
                 f.rename(field_names[i], field_names[i])
                 xdmf.write(f, 𝑡)
         except IOError as e:
             MPI.Abort(e)
+        viz_t = viz_q.get()
 
-        write_csv_summary(bm1_log, crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, i, start))
-
-        io_t = io_q.get()
 
         print0("[{}] Next summary at 𝑡={}".format(
-            timedelta(seconds=(MPI.Wtime() - epoch)), io_t))
+            timedelta(seconds=(MPI.Wtime() - epoch)), viz_t))
 
         gc.collect()
 
