@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 PFHub Benchmark 1: Spinodal Decomposition
 Implemented using FEniCS by Trevor Keller (@tkphd, <trevor.keller@nist.gov>)
@@ -100,23 +99,18 @@ class InitialConditions(UserExpression):
 def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, r, τ):
     𝑛 = len(𝛀.coordinates())
     𝒎 = assemble(𝑐 * Δ𝑥)
-    𝓕 = assemble(𝜌 * (𝑐 - 𝛼)**2 * (𝛽 - 𝑐)**2 * Δ𝑥) \
+    𝐅 = assemble(𝜌 * (𝑐 - 𝛼)**2 * (𝛽 - 𝑐)**2 * Δ𝑥) \
       + assemble(0.5 * 𝜅 * dot(grad(𝑐), grad(𝑐)) * Δ𝑥)
-    𝜂 = assemble(np.abs(𝜇 - 𝜆)/𝑛 * Δ𝑥)
-    # 𝑛 = COMM.allreduce(len(𝛀.coordinates()), op=MPI.SUM)
-
-    #𝐜 = COMM.allreduce(𝒎 / 𝑛, op=MPI.SUM)
-    #𝐅 = COMM.allreduce(𝓕, op=MPI.SUM)
-    #𝛈 = COMM.allreduce(𝜂 / 𝑛, op=MPI.SUM)
-    #𝐫 = COMM.allreduce(r, op=MPI.MAX)
+    𝛈 = assemble(np.abs(𝜇 - 𝜆) / 𝑛 * Δ𝑥)
     𝛕 = MPI.Wtime() - τ
 
-    return (𝑡, 𝒎, 𝓕, 𝜂, 𝐫, 𝛕)
+    return (𝑡, 𝒎 / 𝑊**2, 𝐅, 𝛈, 𝐫, 𝛕)
 
 
 def print0(s):
     if rank == 0:
         print(s)
+
 
 def set_file_params(file):
     file.parameters["flush_output"] = True
@@ -151,6 +145,7 @@ def write_csv_summary(filename, summary):
                 io.writerow(summary)
             except IOError as e:
                 MPI.Abort(e)
+
 
 # Define domain and finite element
 𝛀 = RectangleMesh(COMM, Point([0, 0]), Point([𝑊, 𝑊]), 𝑁, 𝑁, diagonal="crossed")
@@ -216,46 +211,43 @@ solver.parameters["krylov_solver"]["relative_tolerance"] = 1e-8
 𝒖.interpolate(𝒊)
 𝒐.interpolate(𝒊)
 
-with XDMFFile(COMM, xdmf_file) as xdmf:
-    set_file_params(xdmf)
-    # write mesh
-    try:
-        xdmf.write(𝛀)
-    except IOError as e:
-        MPI.Abort(e)
-    # write initial condition
+xdmf = XDMFFile(COMM, xdmf_file)
+set_file_params(xdmf)
+
+try:
+    xdmf.write(𝛀)
     for i, f in enumerate(𝒖.split()):
-        try:
-            f.rename(field_names[i], field_names[i])
-            xdmf.write(f, 0.0)
-        except IOError as e:
-            MPI.Abort(e)
+        f.rename(field_names[i], field_names[i])
+        xdmf.write(f, 0.0)
+except IOError as e:
+    MPI.Abort(e)
 
 # === TIMESTEPPING ===
 
 # Enqueue output timestamps
 io_q = queue.Queue()
 
-for t_out in np.arange(0, 1, Δ𝑡):
-    io_q.put(t_out)
-for n in np.arange(0, 7):
+io_q.put(1.0)
+io_q.put(2.0)
+io_q.put(5.0)
+for n in np.arange(1, 7):
     for m in np.arange(1, 10):
-        t_out = m * 10.0**n
-        if t_out <= 𝑇:
-            io_q.put(t_out)
+        for l in np.arange(-1, 2, 1):
+            t_out = l + m * 10.0**n
+            if t_out <= 𝑇:
+                io_q.put(t_out)
 
 start = MPI.Wtime()
 
 write_csv_header(bm1_log)
-write_csv_summary(bm1_log, crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, 0, start))
 
 Δ𝜇 = 1.0
 io_t = io_q.get()
+converged = True
 
 print0("[{}] Next summary at 𝑡={}".format(
     timedelta(seconds=(MPI.Wtime() - epoch)), io_t))
-
-converged = True
+write_csv_summary(bm1_log, crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, 0, start))
 
 while (converged) and (Δ𝜇 > 1e-8) and (𝑡 < 𝑇):
     𝑡 += Δ𝑡
@@ -264,14 +256,13 @@ while (converged) and (Δ𝜇 > 1e-8) and (𝑡 < 𝑇):
     i, converged = solver.solve(problem, 𝒖.vector())
 
     if np.isclose(𝑡, io_t) or 𝑡 > io_t:
-        with XDMFFile(COMM, xdmf_file) as xdmf:
-            set_file_params(xdmf)
+        # write visualization checkpoints
+        try:
             for i, f in enumerate(𝒖.split()):
-                try:
-                    f.rename(field_names[i], field_names[i])
-                    xdmf.write(f, 𝑡)
-                except IOError as e:
-                    MPI.Abort(e)
+                f.rename(field_names[i], field_names[i])
+                xdmf.write(f, 𝑡)
+        except IOError as e:
+            MPI.Abort(e)
 
         write_csv_summary(bm1_log, crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, i, start))
 
@@ -282,4 +273,5 @@ while (converged) and (Δ𝜇 > 1e-8) and (𝑡 < 𝑇):
 
         gc.collect()
 
+xdmf.close()
 print0("Finished simulation after {} s.".format(MPI.Wtime() - epoch))
