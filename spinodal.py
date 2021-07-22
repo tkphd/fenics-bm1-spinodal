@@ -17,8 +17,6 @@ Usage:  mpirun -np 4 --mca opal_cuda_support 0 python -u spinodal.py
 
 from mpi4py import MPI
 
-epoch = MPI.Wtime()
-
 import csv
 from datetime import timedelta
 import gc
@@ -30,11 +28,15 @@ from os import path
 from petsc4py import PETSc
 from sys import argv
 
-from dolfin import Function, FunctionSpace, LogLevel, MixedElement, NewtonSolver, NonlinearProblem, Point, RectangleMesh, UserExpression, XDMFFile
-from dolfin import FiniteElement, TestFunctions, TrialFunction
-from dolfin import assemble, parameters, cos, derivative, diff, dot, grad, set_log_level
-from dolfin import cos, derivative, diff, dot, grad, project, split, variable
+from dolfin import (FiniteElement, Function, FunctionSpace, LogLevel,
+                    MixedElement, NewtonSolver, NonlinearProblem, Point,
+                    RectangleMesh, TestFunctions, TrialFunction,
+                    UserExpression, XDMFFile)
+from dolfin import (assemble, cos, derivative, diff, dot, grad, parameters,
+                    project, set_log_level, split, variable)
 from dolfin import dx as Δ𝑥
+
+epoch = MPI.Wtime()
 
 # Model parameters
 𝜅 = 2  # gradient energy coefficient
@@ -86,10 +88,10 @@ class CahnHilliardEquation(NonlinearProblem):
 
 class InitialConditions(UserExpression):
     def eval(self, values, x):
-        values[0] = 𝜁 + 𝜀 * (
-            cos(0.105 * x[0]) * cos(0.11 * x[1]) +
-            (cos(0.13 * x[0]) * cos(0.087 * x[1]))**2 +
-            cos(0.025 * x[0] - 0.15 * x[1]) * cos(0.07 * x[0] - 0.02 * x[1]))
+        A = cos(0.105 * x[0]) * cos(0.11 * x[1])
+        B = cos(0.13 * x[0]) * cos(0.087 * x[1])
+        C = cos(0.025 * x[0] - 0.15 * x[1]) * cos(0.07 * x[0] - 0.02 * x[1])
+        values[0] = 𝜁 + 𝜀 * (A + B**2 + C)
         values[1] = 0.0
 
     def value_shape(self):
@@ -100,7 +102,7 @@ def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, i, τ):
     𝑛 = len(𝛀.coordinates())
     𝐦 = assemble(𝑐 * Δ𝑥) / 𝑊**2
     𝐅 = assemble(𝜌 * (𝑐 - 𝛼)**2 * (𝛽 - 𝑐)**2 * Δ𝑥) \
-      + assemble(0.5 * 𝜅 * dot(grad(𝑐), grad(𝑐)) * Δ𝑥)
+        + assemble(0.5 * 𝜅 * dot(grad(𝑐), grad(𝑐)) * Δ𝑥)
     𝛈 = assemble(np.abs(𝜇 - 𝜆) / 𝑛 * Δ𝑥)
     𝐢 = COMM.allreduce(i, op=MPI.MAX)
     𝛕 = MPI.Wtime() - τ
@@ -237,8 +239,8 @@ for n in np.arange(1, 7):
         t_viz = int(m * 10.0**n)
         if t_viz <= 𝑇:
             viz_q.put(t_viz)
-        for l in np.arange(-1, 2, 1):
-            t_nrg = int(l + t_viz)
+        for k in np.arange(-1, 2, 1):
+            t_nrg = int(k + t_viz)
             if t_nrg <= 𝑇:
                 nrg_q.put(t_nrg)
 
@@ -275,7 +277,6 @@ while (converged) and (Δ𝜇 > 1e-8) and (𝑡 < 𝑇):
         except IOError as e:
             MPI.Abort(e)
         viz_t = viz_q.get()
-
 
         print0("[{}] Next summary at 𝑡={}".format(
             timedelta(seconds=(MPI.Wtime() - epoch)), viz_t))

@@ -15,7 +15,7 @@ NAME = pfhub
 # Make Targets
 
 all: fenics-bm-1b.xdmf
-.PHONY: all clean lint shell start stop watch
+.PHONY: all clean format lint shell start stop watch
 
 fenics-bm-1b.xdmf: spinodal.py
 	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py
@@ -23,8 +23,11 @@ fenics-bm-1b.xdmf: spinodal.py
 clean:
 	rm -vf *.csv *.h5 *.log *.xdmf
 
+format: spinodal.py
+	yapf -i $<
+
 lint: spinodal.py
-	yapf -i spinodal.py
+	pycodestyle $<
 
 list:
 	singularity instance list
