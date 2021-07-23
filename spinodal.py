@@ -95,11 +95,10 @@ class InitialConditions(UserExpression):
         return (2, )
 
 
-def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, i, 𝜈, τ):
+def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, i, 𝜈, τ):
     𝑛 = len(𝛀.coordinates())
     𝐦 = assemble(𝑐 * Δ𝑥) / 𝑊**2
-    𝐅 = assemble(𝜌 * (𝑐 - 𝛼)**2 * (𝛽 - 𝑐)**2 * Δ𝑥
-                 + 0.5 * 𝜅 * dot(grad(𝑐), grad(𝑐)) * Δ𝑥)
+    𝐅 = assemble(𝐹 * Δ𝑥)
     𝛈 = assemble(np.abs(𝜇 - 𝜆) / 𝑛 * Δ𝑥)
     𝐢 = COMM.allreduce(i, op=MPI.MAX)
     𝛎 = COMM.allreduce(𝜈, op=MPI.MIN)
@@ -108,8 +107,8 @@ def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, i, 𝜈, τ):
     pid = getpid()
     status = open("/proc/%d/status" % pid).read()
 
-    mem_now = int(status.split("VmSize:")[1].split("kB")[0])/1024.
-    mem_max = int(status.split("VmPeak:")[1].split("kB")[0])/1024.
+    mem_now = int(status.split("VmSize:")[1].split("kB")[0]) / 1024.
+    mem_max = int(status.split("VmPeak:")[1].split("kB")[0]) / 1024.
 
     mem_now = COMM.allreduce(mem_now, op=MPI.SUM)
     mem_max = COMM.allreduce(mem_max, op=MPI.SUM)
@@ -186,7 +185,7 @@ d𝑐, d𝜇 = split(d𝒖)
 
 𝑐 = variable(𝑐)
 
-𝐹 = 𝜌 * (𝑐 - 𝛼)**2 * (𝛽 - 𝑐)**2
+𝐹 = 𝜌 * (𝑐 - 𝛼)**2 * (𝛽 - 𝑐)**2 + 0.5 * 𝜅 * dot(grad(𝑐), grad(𝑐))
 𝑓 = diff(𝐹, 𝑐)
 
 # === Weak Form ===
@@ -258,11 +257,12 @@ for n in np.arange(1, 7):
 Δ𝜇 = 1.0
 viz_t = viz_q.get()
 nrg_t = nrg_q.get()
-rate = 0.3 * (4.0 / MPI.Get_size())  # Guess initial rate based on 4-core CPU
+rate = 0.3 * (4.0 / COMM.Get_size())  # Guess initial rate based on 4-core CPU
 
 start = MPI.Wtime()
 write_csv_header(bm1_log)
-write_csv_summary(bm1_log, crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, 0, rate, start))
+write_csv_summary(bm1_log,
+                  crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, 0, rate, start))
 
 print0("[{}] Simulation started.".format(
     timedelta(seconds=int((MPI.Wtime() - epoch)))))
@@ -287,7 +287,7 @@ while (Δ𝜇 > 1e-8) and (𝑡 < 𝑇):
         # write free energy summary
         rate = float(nits) / (MPI.Wtime() - itime)
         write_csv_summary(bm1_log,
-                          crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, i, rate, start))
+                          crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, i, rate, start))
 
         if not nrg_q.empty():
             nrg_t = nrg_q.get()
