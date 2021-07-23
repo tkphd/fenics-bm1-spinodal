@@ -255,7 +255,7 @@ for n in np.arange(1, 7):
 Δ𝜇 = 1.0
 viz_t = viz_q.get()
 nrg_t = nrg_q.get()
-rate = 0.3
+rate = 0.3 * (4.0 / MPI.Get_size()) # Guess initial rate based on 4-core CPU
 
 start = MPI.Wtime()
 write_csv_header(bm1_log)
