@@ -68,6 +68,7 @@ COMM = MPI.COMM_WORLD
 rank = MPI.COMM_WORLD.Get_rank()
 set_log_level(LogLevel.ERROR)
 
+
 class CahnHilliardEquation(NonlinearProblem):
     def __init__(self, a, L):
         NonlinearProblem.__init__(self)
@@ -86,7 +87,7 @@ class InitialConditions(UserExpression):
         A = cos(0.105 * x[0]) * cos(0.110 * x[1])
         B = cos(0.130 * x[0]) * cos(0.087 * x[1])
         C = cos(0.025 * x[0] - 0.150 * x[1]) \
-          * cos(0.070 * x[0] - 0.020 * x[1])
+            * cos(0.070 * x[0] - 0.020 * x[1])
         values[0] = 𝜁 + 𝜀 * (A + B**2 + C)
         values[1] = 0.0
 
@@ -115,10 +116,12 @@ def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝜇, 𝜆, i, 𝜈, τ):
 
     return (𝑡, 𝐦, 𝐅, 𝛈, 𝐢, 𝛎, 𝛕, mem_now, mem_max)
 
+
 def guesstimate(rate, t_now, t_nxt):
     est_nxt = timedelta(seconds=int((viz_t - 𝑡) / (Δ𝑡 * rate)))
     est_all = timedelta(seconds=int((𝑇 - 𝑡) / (Δ𝑡 * rate)))
     return (est_nxt, est_all)
+
 
 def print0(s):
     if rank == 0:
@@ -255,7 +258,7 @@ for n in np.arange(1, 7):
 Δ𝜇 = 1.0
 viz_t = viz_q.get()
 nrg_t = nrg_q.get()
-rate = 0.3
+rate = 0.3 * (4.0 / MPI.Get_size())  # Guess initial rate based on 4-core CPU
 
 start = MPI.Wtime()
 write_csv_header(bm1_log)
