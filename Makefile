@@ -18,7 +18,7 @@ all: fenics-bm-1b.xdmf
 .PHONY: all clean format lint shell start stop watch
 
 fenics-bm-1b.xdmf: spinodal.py
-	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py
+	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py 1000
 
 clean:
 	rm -vf *.csv *.h5 *.log *.xdmf
