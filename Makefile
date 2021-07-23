@@ -42,4 +42,4 @@ stop:
 	singularity instance stop $(NAME)
 
 watch:
-	watch singularity exec instance://$(NAME) "tail -n 50 fenics-bm-1b.csv | column -s, -t"
+	watch singularity exec instance://$(NAME) "tail -n 40 fenics-bm-1b.csv | column -s, -t"
