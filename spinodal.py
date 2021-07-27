@@ -32,11 +32,13 @@ from sys import argv
 
 from dolfin import (FiniteElement, Function, FunctionSpace,
                     LagrangeInterpolator, LogLevel, MixedElement, NewtonSolver,
-                    NonlinearProblem, Point, RectangleMesh, TestFunctions,
-                    TrialFunction, UserExpression, XDMFFile)
-from dolfin import (assemble, cos, derivative, diff, dot, grad, parameters,
+                    NonlinearProblem, Point, RectangleMesh,
+                    TestFunctions, TrialFunction, UserExpression, XDMFFile)
+from dolfin import (assemble, cos, derivative, grad, inner, parameters,
                     project, set_log_level, sin, split, variable)
 from dolfin import dx as Δ𝑥
+
+from ufl import replace
 
 # Model parameters
 𝜅 = 2  # gradient energy coefficient
@@ -52,6 +54,7 @@ from dolfin import dx as Δ𝑥
 𝑁 = 400  # cells
 𝑡 = 0.0  # simulation time
 Δ𝑡 = 0.125  # timestep
+𝜃 = 0.5  # Crank-Nicolson parameter
 𝑇 = 1e6  # simulation timeout
 poly_deg = 1  # polynomial degree, adds degrees of freedom
 quad_deg = 2  # quadrature degree, at least 2 poly_deg
@@ -68,6 +71,33 @@ field_names = ("𝑐", "𝜇")
 COMM = MPI.COMM_WORLD
 rank = MPI.COMM_WORLD.Get_rank()
 set_log_level(LogLevel.ERROR)
+
+
+def weak_form(𝒖, 𝒐, ℝ, 𝛀, 𝐸):
+    # Define the 𝑐 function based on the real space
+    𝑝, 𝑞 = TestFunctions(ℝ)
+    𝑐, 𝜇 = split(𝒖)  # references to components of 𝒖 for clear, direct access
+    𝑏, 𝜆 = split(𝒐)  # 𝑏, 𝜆 are the previous values for 𝑐, 𝜇
+    𝜇𝜃 = (1 - 𝜃) * 𝜆 + 𝜃 * 𝜇  # Crank-Nicolson mid-step solution
+
+    𝑪 = inner(𝑐 - 𝑏, 𝑝) * Δ𝑥 + Δ𝑡 * 𝑀 * inner(grad(𝜇𝜃), grad(𝑝)) * Δ𝑥
+
+    # Define the 𝜇 function based on the virtual space
+    𝕍 = FunctionSpace(𝛀, 𝐸)
+    𝒗 = Function(𝕍)
+    𝒙 = variable(𝒗)
+
+    𝐵 = 𝜌 * (𝒙 - 𝛼)**2 * (𝛽 - 𝒙)**2
+    𝐺 = 0.5 * 𝜅 * inner(grad(𝒙), grad(𝒙))
+    𝐹 = 𝐵 + 𝐺
+    𝑓 = replace(derivative(𝐹, 𝒗, 𝑞), {𝒗: 𝑐})
+
+    𝑼 = (𝜇 * 𝑞 - 𝑓) * Δ𝑥
+
+    𝐹 = replace(𝐹, {𝒗: 𝑐})
+    𝐿 = 𝑪 + 𝑼
+
+    return 𝐹, 𝐿
 
 
 class CahnHilliardEquation(NonlinearProblem):
@@ -194,54 +224,39 @@ def write_csv_summary(filename, summary):
 # Define domain and finite element
 𝛀 = RectangleMesh(COMM, Point([0, 0]), Point([𝑊, 𝑊]), 𝑁, 𝑁, diagonal="crossed")
 𝓟 = FiniteElement("Lagrange", 𝛀.ufl_cell(), poly_deg)
+𝐸 = MixedElement([𝓟, 𝓟])
 
 # Create the function space from both the mesh and the element
-𝕊 = FunctionSpace(𝛀, MixedElement([𝓟, 𝓟]))
+𝕊 = FunctionSpace(𝛀, 𝐸)
+d𝒖 = TrialFunction(𝕊)
 
 # Build the solution, trial, and test functions
 𝒖 = Function(𝕊)  # current solution
 𝒐 = Function(𝕊)  # old (previous) solution
-d𝒖 = TrialFunction(𝕊)
-𝑞, 𝑣 = TestFunctions(𝕊)
-
-# Mixed functions
-d𝑐, d𝜇 = split(d𝒖)
 𝑐, 𝜇 = split(𝒖)  # references to components of 𝒖 for clear, direct access
 𝑏, 𝜆 = split(𝒐)  # 𝑏, 𝜆 are the previous values for 𝑐, 𝜇
 
-𝐹 = 𝜌 * (𝑐 - 𝛼)**2 * (𝛽 - 𝑐)**2
-𝑓 = diff(𝐹, variable(𝑐))
-
-𝐹 += 0.5 * 𝜅 * dot(grad(𝑐), grad(𝑐))
-
 # === Weak Form ===
-
-# Half-stepping parameter for Crank-Nicolson
-𝜃 = 0.5  # Crank-Nicolson parameter
-𝜇𝜃 = (1 - 𝜃) * 𝜆 + 𝜃 * 𝜇
-
-# Crank-Nicolson time discretization in UFL syntax
-𝐿c = (𝑐 - 𝑏) * 𝑞 * Δ𝑥 + Δ𝑡 * 𝑀 * dot(grad(𝜇𝜃), grad(𝑞)) * Δ𝑥
-𝐿u = (𝜇 - 𝑓) * 𝑣 * Δ𝑥 - 𝜅 * dot(grad(𝑐), grad(𝑣)) * Δ𝑥
-
-𝐿 = 𝐿c + 𝐿u
-𝐽 = derivative(𝐿, 𝒖, d𝒖)
+𝐹, 𝐿 = weak_form(𝒖, 𝒐, 𝕊, 𝛀, 𝓟)
+𝑱 = derivative(𝐿, 𝒖, d𝒖)
 
 # === Solver ===
 
-problem = CahnHilliardEquation(𝐽, 𝐿)
+problem = CahnHilliardEquation(𝑱, 𝐿)
 solver = NewtonSolver(COMM)
 
 solver.parameters["linear_solver"] = "lu"
+solver.parameters["relative_tolerance"] = 1e-3
+solver.parameters["absolute_tolerance"] = 1e-7
 solver.parameters["convergence_criterion"] = "incremental"
-solver.parameters["relative_tolerance"] = 1e-4
-solver.parameters["absolute_tolerance"] = 1e-8
+solver.parameters["error_on_nonconvergence"] = True
 
 parameters["linear_algebra_backend"] = "PETSc"
 parameters["form_compiler"]["optimize"] = True
 parameters["form_compiler"]["cpp_optimize"] = True
 parameters["form_compiler"]["representation"] = "uflacs"
 parameters["form_compiler"]["quadrature_degree"] = quad_deg
+parameters["form_compiler"]["precision"] = 300
 
 # === Initial Conditions ===
 
@@ -283,7 +298,7 @@ for n in np.arange(1, 7):
 Δ𝜇 = 1.0
 viz_t = viz_q.get()
 nrg_t = nrg_q.get()
-rate = 0.3 * (4.0 / COMM.Get_size())  # Guess initial rate based on 4-core CPU
+rate = 0.5 * (4.0 / COMM.Get_size())  # Guess initial rate based on 4-core CPU
 
 start = MPI.Wtime()
 write_csv_header(bm1_log)
