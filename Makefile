@@ -24,10 +24,10 @@ clean:
 	rm -vf *.csv *.h5 *.log *.xdmf
 
 format: spinodal.py
-	yapf -i $<
+	yapf --style=.style.yapf -i $<
 
 lint: spinodal.py
-	pycodestyle --ignore=E402 $<
+	pycodestyle --ignore=E128,E402,W503 $<
 
 list:
 	singularity instance list

@@ -17,6 +17,7 @@ Usage:  mpirun -np 4 --mca opal_cuda_support 0 python -u spinodal.py
 """
 
 from mpi4py import MPI
+
 epoch = MPI.Wtime()
 
 import csv
@@ -34,7 +35,7 @@ from dolfin import (FiniteElement, Function, FunctionSpace,
                     NonlinearProblem, Point, RectangleMesh, TestFunctions,
                     TrialFunction, UserExpression, XDMFFile)
 from dolfin import (assemble, cos, derivative, diff, dot, grad, parameters,
-                    project, set_log_level, split, variable)
+                    project, set_log_level, sin, split, variable)
 from dolfin import dx as Δ𝑥
 
 # Model parameters
@@ -84,12 +85,44 @@ class CahnHilliardEquation(NonlinearProblem):
 
 class InitialConditions(UserExpression):
     def eval(self, values, x):
-        A = cos(0.105 * x[0]) * cos(0.110 * x[1])
-        B = cos(0.130 * x[0]) * cos(0.087 * x[1])
-        C = cos(0.025 * x[0] - 0.150 * x[1]) \
-            * cos(0.070 * x[0] - 0.020 * x[1])
-        values[0] = 𝜁 + 𝜀 * (A + B**2 + C)
-        values[1] = 0.0
+        cA = cos(0.105 * x[0]) * cos(0.110 * x[1])
+        cB = (cos(0.130 * x[0]) * cos(0.087 * x[1]))**2
+        cC = (cos(0.025 * x[0] - 0.150 * x[1])
+              * cos(0.070 * x[0] - 0.020 * x[1]))
+
+        values[0] = 𝜁 + 𝜀 * (cA + cB + cC)
+
+        uA = 𝜀 * 𝜅 * (-0.0095 * sin(0.025 * x[0] - 0.15 * x[1])
+                      * sin(0.07 * x[0] - 0.02 * x[1])
+                      + 0.023125 * cos(0.105 * x[0]) * cos(0.11 * x[1])
+                      + 0.097876 * cos(0.13 * x[0])**2 * cos(0.087 * x[1])**2
+                      - 0.015138 * cos(0.13 * x[0])**2
+                      - 0.0338 * cos(0.087 * x[1])**2
+                      + 0.028425 * cos(0.025 * x[0] - 0.15 * x[1])
+                      * cos(0.07 * x[0] - 0.02 * x[1]))
+        uB = 2 * 𝜌 * (
+            -𝛼 + 𝜀 *
+            (cos(0.105 * x[0]) * cos(0.11 * x[1]) + cos(0.13 * x[0])**2
+             * cos(0.087 * x[1])**2 + cos(0.025 * x[0] - 0.15 * x[1])
+             * cos(0.07 * x[0] - 0.02 * x[1])) + 𝜁)**2
+        uC = (
+            -𝛽 + 𝜀 *
+            (cos(0.105 * x[0]) * cos(0.11 * x[1])
+             + cos(0.13 * x[0])**2 * cos(0.087 * x[1])**2 +
+             cos(0.025 * x[0] - 0.15 * x[1]) * cos(0.07 * x[0] - 0.02 * x[1]))
+            + 𝜁)
+        uD = 2 * 𝜌 * (-𝛼 + 𝜀 *
+                   (cos(0.105 * x[0]) * cos(0.11 * x[1]) + cos(0.13 * x[0])**2
+                    * cos(0.087 * x[1])**2 + cos(0.025 * x[0] - 0.15 * x[1])
+                    * cos(0.07 * x[0] - 0.02 * x[1])) + 𝜁)
+        uE = (
+            -𝛽 + 𝜀 *
+            (cos(0.105 * x[0]) * cos(0.11 * x[1])
+             + cos(0.13 * x[0])**2 * cos(0.087 * x[1])**2 +
+             cos(0.025 * x[0] - 0.15 * x[1]) * cos(0.07 * x[0] - 0.02 * x[1]))
+            + 𝜁)**2
+
+        values[1] = uA + uB * uC + uD * uE
 
     def value_shape(self):
         return (2, )
@@ -137,15 +170,8 @@ def write_csv_header(filename):
     if rank == 0:
         with open(filename, mode="w") as nrg_file:
             header = [
-                "time",
-                "composition",
-                "free_energy",
-                "driving_force",
-                "its",
-                "sim_rate",
-                "runtime",
-                "memory",
-                "max_mem"
+                "time", "composition", "free_energy", "driving_force", "its",
+                "sim_rate", "runtime", "memory", "max_mem"
             ]
 
             try:
@@ -183,23 +209,22 @@ d𝑐, d𝜇 = split(d𝒖)
 𝑐, 𝜇 = split(𝒖)  # references to components of 𝒖 for clear, direct access
 𝑏, 𝜆 = split(𝒐)  # 𝑏, 𝜆 are the previous values for 𝑐, 𝜇
 
-𝑐 = variable(𝑐)
-
 𝐹 = 𝜌 * (𝑐 - 𝛼)**2 * (𝛽 - 𝑐)**2
-𝑓 = diff(𝐹, 𝑐)
+𝑓 = diff(𝐹, variable(𝑐))
+
 𝐹 += 0.5 * 𝜅 * dot(grad(𝑐), grad(𝑐))
 
 # === Weak Form ===
 
 # Half-stepping parameter for Crank-Nicolson
 𝜃 = 0.5  # Crank-Nicolson parameter
-𝜇_mid = (1 - 𝜃) * 𝜆 + 𝜃 * 𝜇
+𝜇𝜃 = (1 - 𝜃) * 𝜆 + 𝜃 * 𝜇
 
-# Time discretization in UFL syntax
-𝐿0 = 𝑐 * 𝑞 * Δ𝑥 - 𝑏 * 𝑞 * Δ𝑥 + Δ𝑡 * dot(grad(𝜇_mid), grad(𝑞)) * Δ𝑥
-𝐿1 = 𝜇 * 𝑣 * Δ𝑥 - 𝑓 * 𝑣 * Δ𝑥 - 𝜅 * dot(grad(𝑐), grad(𝑣)) * Δ𝑥
+# Crank-Nicolson time discretization in UFL syntax
+𝐿c = (𝑐 - 𝑏) * 𝑞 * Δ𝑥 + Δ𝑡 * 𝑀 * dot(grad(𝜇𝜃), grad(𝑞)) * Δ𝑥
+𝐿u = (𝜇 - 𝑓) * 𝑣 * Δ𝑥 - 𝜅 * dot(grad(𝑐), grad(𝑣)) * Δ𝑥
 
-𝐿 = 𝐿0 + 𝐿1
+𝐿 = 𝐿c + 𝐿u
 𝐽 = derivative(𝐿, 𝒖, d𝒖)
 
 # === Solver ===
@@ -207,16 +232,16 @@ d𝑐, d𝜇 = split(d𝒖)
 problem = CahnHilliardEquation(𝐽, 𝐿)
 solver = NewtonSolver(COMM)
 
+solver.parameters["linear_solver"] = "lu"
+solver.parameters["convergence_criterion"] = "incremental"
+solver.parameters["relative_tolerance"] = 1e-4
+solver.parameters["absolute_tolerance"] = 1e-8
+
 parameters["linear_algebra_backend"] = "PETSc"
 parameters["form_compiler"]["optimize"] = True
 parameters["form_compiler"]["cpp_optimize"] = True
 parameters["form_compiler"]["representation"] = "uflacs"
 parameters["form_compiler"]["quadrature_degree"] = quad_deg
-
-solver.parameters["linear_solver"] = "lu"
-solver.parameters["convergence_criterion"] = "incremental"
-solver.parameters["relative_tolerance"] = 1e-4
-solver.parameters["absolute_tolerance"] = 1e-8
 
 # === Initial Conditions ===
 
@@ -270,7 +295,8 @@ print0("[{}] Simulation started.".format(
 
 est_t, all_t = guesstimate(rate, 𝑡, viz_t)
 print0("[{}] ETA: 𝑡={} in {}, 𝑡={} in {}".format(
-    timedelta(seconds=int((MPI.Wtime() - epoch))), viz_t, est_t, 𝑇, all_t))
+    timedelta(seconds=int((MPI.Wtime() - epoch))),
+    viz_t, est_t, 𝑇, all_t))
 
 nits = 0
 itime = MPI.Wtime()
