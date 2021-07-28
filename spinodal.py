@@ -30,12 +30,14 @@ from os import getpid, path
 from petsc4py import PETSc
 from sys import argv
 
-from dolfin import (FiniteElement, Function, FunctionSpace,
-                    LagrangeInterpolator, LogLevel, MixedElement, NewtonSolver,
-                    NonlinearProblem, Point, RectangleMesh,
-                    TestFunctions, TrialFunction, UserExpression, XDMFFile)
-from dolfin import (assemble, cos, derivative, grad, inner, parameters,
-                    project, set_log_level, sin, split, variable)
+from dolfin import FiniteElement, FunctionSpace, MixedElement
+from dolfin import Function, TestFunctions, TrialFunction
+from dolfin import LagrangeInterpolator, NewtonSolver, NonlinearProblem
+from dolfin import Mesh, Point, RectangleMesh, UserExpression
+from dolfin import XDMFFile
+from dolfin import LogLevel, set_log_level
+from dolfin import cos, derivative, grad, inner, sin, variable
+from dolfin import assemble, parameters, split
 from dolfin import dx as Δ𝑥
 
 from ufl import replace
@@ -51,13 +53,14 @@ from ufl import replace
 
 # Discretization parameters
 𝑊 = 200  # width
-𝑁 = 400  # cells
+𝑁 = 200  # cells
 𝑡 = 0.0  # simulation time
 Δ𝑡 = 0.125  # timestep
 𝜃 = 0.5  # Crank-Nicolson parameter
 𝑇 = 1e6  # simulation timeout
 poly_deg = 1  # polynomial degree, adds degrees of freedom
 quad_deg = 2  # quadrature degree, at least 2 poly_deg
+field_names = ("𝑐", "𝜇")
 
 # Read runtime from command line
 if (len(argv) == 2) and (np.isfinite(int(argv[1]))):
@@ -65,8 +68,8 @@ if (len(argv) == 2) and (np.isfinite(int(argv[1]))):
 
 # Output -- check if there's already data here
 bm1_log = "fenics-bm-1b.csv"
-xdmf_file = "fenics-bm-1b.xdmf"
-field_names = ("𝑐", "𝜇")
+bm1_viz = "fenics-bm-1b.xdmf"
+bm1_chk = "checkpoint.xdmf"
 
 COMM = MPI.COMM_WORLD
 rank = MPI.COMM_WORLD.Get_rank()
@@ -87,9 +90,7 @@ def weak_form(𝒖, 𝒐, ℝ, 𝛀, 𝐸):
     𝒗 = Function(𝕍)
     𝒙 = variable(𝒗)
 
-    𝐵 = 𝜌 * (𝒙 - 𝛼)**2 * (𝛽 - 𝒙)**2
-    𝐺 = 0.5 * 𝜅 * inner(grad(𝒙), grad(𝒙))
-    𝐹 = 𝐵 + 𝐺
+    𝐹 = 𝜌 * (𝒙 - 𝛼)**2 * (𝛽 - 𝒙)**2 + 0.5 * 𝜅 * inner(grad(𝒙), grad(𝒙))
     𝑓 = replace(derivative(𝐹, 𝒗, 𝑞), {𝒗: 𝑐})
 
     𝑼 = (𝜇 * 𝑞 - 𝑓) * Δ𝑥
@@ -130,27 +131,26 @@ class InitialConditions(UserExpression):
                       - 0.0338 * cos(0.087 * x[1])**2
                       + 0.028425 * cos(0.025 * x[0] - 0.15 * x[1])
                       * cos(0.07 * x[0] - 0.02 * x[1]))
-        uB = 2 * 𝜌 * (
-            -𝛼 + 𝜀 *
-            (cos(0.105 * x[0]) * cos(0.11 * x[1]) + cos(0.13 * x[0])**2
-             * cos(0.087 * x[1])**2 + cos(0.025 * x[0] - 0.15 * x[1])
-             * cos(0.07 * x[0] - 0.02 * x[1])) + 𝜁)**2
-        uC = (
-            -𝛽 + 𝜀 *
-            (cos(0.105 * x[0]) * cos(0.11 * x[1])
-             + cos(0.13 * x[0])**2 * cos(0.087 * x[1])**2 +
-             cos(0.025 * x[0] - 0.15 * x[1]) * cos(0.07 * x[0] - 0.02 * x[1]))
-            + 𝜁)
-        uD = 2 * 𝜌 * (-𝛼 + 𝜀 *
-                   (cos(0.105 * x[0]) * cos(0.11 * x[1]) + cos(0.13 * x[0])**2
-                    * cos(0.087 * x[1])**2 + cos(0.025 * x[0] - 0.15 * x[1])
-                    * cos(0.07 * x[0] - 0.02 * x[1])) + 𝜁)
-        uE = (
-            -𝛽 + 𝜀 *
-            (cos(0.105 * x[0]) * cos(0.11 * x[1])
-             + cos(0.13 * x[0])**2 * cos(0.087 * x[1])**2 +
-             cos(0.025 * x[0] - 0.15 * x[1]) * cos(0.07 * x[0] - 0.02 * x[1]))
-            + 𝜁)**2
+        uB = 2 * 𝜌 * (-𝛼 + 𝜀
+                      * (cos(0.105 * x[0]) * cos(0.11 * x[1])
+                         + cos(0.13 * x[0])**2 * cos(0.087 * x[1])**2
+                         + cos(0.025 * x[0] - 0.15 * x[1])
+                         * cos(0.07 * x[0] - 0.02 * x[1])) + 𝜁)**2
+        uC = (𝜁 - 𝛽 + 𝜀
+              * (cos(0.105 * x[0]) * cos(0.11 * x[1])
+                 + cos(0.13 * x[0])**2 * cos(0.087 * x[1])**2
+                 + cos(0.025 * x[0] - 0.15 * x[1])
+                 * cos(0.07 * x[0] - 0.02 * x[1])))
+        uD = 2 * 𝜌 * (𝜁 - 𝛼 + 𝜀
+                      * (cos(0.105 * x[0]) * cos(0.11 * x[1])
+                         + cos(0.13 * x[0])**2 * cos(0.087 * x[1])**2
+                         + cos(0.025 * x[0] - 0.15 * x[1])
+                      * cos(0.07 * x[0] - 0.02 * x[1])))
+        uE = (𝜁 - 𝛽 + 𝜀
+              * (cos(0.105 * x[0]) * cos(0.11 * x[1])
+                 + cos(0.13 * x[0])**2 * cos(0.087 * x[1])**2
+                 + cos(0.025 * x[0] - 0.15 * x[1])
+                 * cos(0.07 * x[0] - 0.02 * x[1])))**2
 
         values[1] = uA + uB * uC + uD * uE
 
@@ -211,7 +211,7 @@ def write_csv_header(filename):
                 MPI.Abort(e)
 
 
-def write_csv_summary(filename, summary):
+def write_csv(filename, summary):
     if rank == 0:
         with open(filename, mode="a") as nrg_file:
             try:
@@ -220,6 +220,22 @@ def write_csv_summary(filename, summary):
             except IOError as e:
                 MPI.Abort(e)
 
+
+def write_viz(xdmf, 𝛀, 𝒖, 𝑡=0.0):
+    try:
+        if np.isclose(0, 𝑡):
+            xdmf.write(𝛀)
+        for n, f in enumerate(𝒖.split()):
+            f.rename(field_names[n], field_names[n])
+            xdmf.write(f, 𝑡)
+            xdmf.close()
+    except IOError as e:
+        MPI.Abort(e)
+
+
+resuming = path.exists(bm1_chk)
+if resuming:
+    print0("Resuming simulation from {}.".format(bm1_chk))
 
 # Define domain and finite element
 𝛀 = RectangleMesh(COMM, Point([0, 0]), Point([𝑊, 𝑊]), 𝑁, 𝑁, diagonal="crossed")
@@ -235,6 +251,14 @@ d𝒖 = TrialFunction(𝕊)
 𝒐 = Function(𝕊)  # old (previous) solution
 𝑐, 𝜇 = split(𝒖)  # references to components of 𝒖 for clear, direct access
 𝑏, 𝜆 = split(𝒐)  # 𝑏, 𝜆 are the previous values for 𝑐, 𝜇
+
+if resuming:
+    with XDMFFile(COMM, bm1_chk) as chk:
+        chk.read_checkpoint(𝒖, "u")
+
+        attr = chk.attributes("u")
+        𝑡 = attr["time"]
+        Δ𝑡 = attr["timestep"]
 
 # === Weak Form ===
 𝐹, 𝐿 = weak_form(𝒖, 𝒐, 𝕊, 𝛀, 𝓟)
@@ -256,54 +280,51 @@ parameters["form_compiler"]["optimize"] = True
 parameters["form_compiler"]["cpp_optimize"] = True
 parameters["form_compiler"]["representation"] = "uflacs"
 parameters["form_compiler"]["quadrature_degree"] = quad_deg
-parameters["form_compiler"]["precision"] = 300
 
 # === Initial Conditions ===
 
-𝒊 = InitialConditions(degree=poly_deg)
-LagrangeInterpolator.interpolate(𝒖, 𝒊)
-LagrangeInterpolator.interpolate(𝒐, 𝒊)
-
-xdmf = XDMFFile(COMM, xdmf_file)
+xdmf = XDMFFile(COMM, bm1_viz)
 set_file_params(xdmf)
 
-try:
-    xdmf.write(𝛀)
-    for i, f in enumerate(𝒖.split()):
-        f.rename(field_names[i], field_names[i])
-        xdmf.write(f, 0.0)
-    xdmf.close()
-except IOError as e:
-    MPI.Abort(e)
+if not resuming:
+    𝒊 = InitialConditions(degree=poly_deg)
+    LagrangeInterpolator.interpolate(𝒖, 𝒊)
+    LagrangeInterpolator.interpolate(𝒐, 𝒊)
 
-# === TIMESTEPPING ===
+    write_viz(xdmf, 𝛀, 𝒖)
 
 # Enqueue output timestamps
 viz_q = queue.Queue()
 nrg_q = queue.Queue()
 
 for t_out in (1, 2, 5):
-    viz_q.put(int(t_out))
-    nrg_q.put(int(t_out))
+    if 𝑡 < t_out:
+        viz_q.put(int(t_out))
+        nrg_q.put(int(t_out))
 for n in np.arange(1, 7):
     step = min(int(10**n), 1000)
     for t_out in np.arange(10**n, 10 * 10**n, step):
-        if t_out <= 𝑇:
+        if 𝑡 < t_out and t_out <= 𝑇:
             viz_q.put(int(t_out))
             for k in (-1, 0, 1):
                 t_nrg = t_out + k
-                if t_nrg <= 𝑇:
+                if 𝑡 < t_nrg and t_nrg <= 𝑇:
                     nrg_q.put(int(t_nrg))
 
-Δ𝜇 = 1.0
 viz_t = viz_q.get()
 nrg_t = nrg_q.get()
-rate = 0.5 * (4.0 / COMM.Get_size())  # Guess initial rate based on 4-core CPU
+
+# === TIMESTEPPING ===
 
 start = MPI.Wtime()
-write_csv_header(bm1_log)
-write_csv_summary(bm1_log,
-                  crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, 0, rate, start))
+
+# Guess initial rate based on 4-core CPU
+rate = 0.5 * (𝑁 / 400)**2 * (4.0 / COMM.Get_size())
+
+if not resuming:
+    write_csv_header(bm1_log)
+    write_csv(bm1_log,
+              crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, 0, rate, start))
 
 print0("[{}] Simulation started.".format(
     timedelta(seconds=int((MPI.Wtime() - epoch)))))
@@ -316,33 +337,34 @@ print0("[{}] ETA: 𝑡={} in {}, 𝑡={} in {}".format(
 nits = 0
 itime = MPI.Wtime()
 
-while (Δ𝜇 > 1e-8) and (𝑡 < 𝑇):
-    𝑡 += Δ𝑡
-    𝒐.vector()[:] = 𝒖.vector()
+# Main time-stepping loop
+while (𝑡 < 𝑇):
+    𝒐.assign(𝒖)
+    its, converged = solver.solve(problem, 𝒖.vector())
 
-    i, converged = solver.solve(problem, 𝒖.vector())
+    𝑡 += Δ𝑡
     nits += 1
+
     if not converged:
         MPI.Abort("Failed to converge!")
 
     if np.isclose(𝑡, nrg_t) or 𝑡 > nrg_t:
         # write free energy summary
         rate = float(nits) / (MPI.Wtime() - itime)
-        write_csv_summary(bm1_log,
-                          crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, i, rate, start))
+        write_csv(bm1_log,
+                  crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, its, rate, start))
 
         if not nrg_q.empty():
             nrg_t = nrg_q.get()
 
     if np.isclose(𝑡, viz_t) or 𝑡 > viz_t:
-        try:
-            # write visualization checkpoint
-            for n, f in enumerate(𝒖.split()):
-                f.rename(field_names[n], field_names[n])
-                xdmf.write(f, 𝑡)
-                xdmf.close()
-        except IOError as e:
-            MPI.Abort(e)
+        write_viz(xdmf, 𝛀, 𝒖, 𝑡)
+        with XDMFFile(COMM, bm1_chk) as chk:
+            chk.write_checkpoint(𝒖, "u", 𝑡)
+
+            attr = chk.attributes("u")
+            attr["time"] = 𝑡
+            attr["timestep"] = Δ𝑡
 
         if not viz_q.empty():
             viz_t = viz_q.get()
