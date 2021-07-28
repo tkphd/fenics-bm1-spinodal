@@ -14,14 +14,14 @@ NAME = pfhub
 
 # Make Targets
 
-all: fenics-bm-1b.xdmf
-.PHONY: all clean format lint shell start stop watch
+all: spinodal
+.PHONY: all clean format lint shell spinodal start stop watch
 
-fenics-bm-1b.xdmf: spinodal.py
-	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py 1000
+spinodal: spinodal.py
+	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py 10000
 
 clean:
-	rm -vf *.csv *.h5 *.hdf *.log *.xdmf
+	rm -vf *.csv *.h5 *.log *.xdmf
 
 format: spinodal.py
 	yapf --style=.style.yapf -i $<

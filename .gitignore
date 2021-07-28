@@ -2,6 +2,7 @@
 .cache
 *.csv
 *.h5
+*.h5
 *.log
 *.o
 *.pvd

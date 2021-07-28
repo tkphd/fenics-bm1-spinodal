@@ -69,11 +69,20 @@ if (len(argv) == 2) and (np.isfinite(int(argv[1]))):
 # Output -- check if there's already data here
 bm1_log = "fenics-bm-1b.csv"
 bm1_viz = "fenics-bm-1b.xdmf"
-bm1_chk = "checkpoint.hdf"
+bm1_chk = "checkpoint.h5"
+resuming = path.exists(bm1_chk)
+
+Δ0 = Δ𝑡 # initial timestep
+Δτ = 0  # runtime offset for resumed simulation
 
 COMM = MPI.COMM_WORLD
 rank = MPI.COMM_WORLD.Get_rank()
 set_log_level(LogLevel.ERROR)
+
+viz_file = XDMFFile(COMM, bm1_viz)
+viz_file.parameters["flush_output"] = True
+viz_file.parameters["rewrite_function_mesh"] = False
+viz_file.parameters["functions_share_mesh"] = True
 
 
 def weak_form(𝒖, 𝒐, ℝ, 𝛀, 𝐸):
@@ -158,6 +167,27 @@ class InitialConditions(UserExpression):
         return (2, )
 
 
+def print0(s):
+    if rank == 0:
+        print(s)
+
+
+def adapt_timestep(𝑡, Δ𝑡, its):
+    dt_max = 10.0
+    growth = 1.2
+    decay = 0.5
+    dt = Δ𝑡
+
+    if (its < 3):
+        dt = min(dt_max, growth * dt)
+        print0("  𝑡 = {}: Δ𝑡 = {:.4f} ⤴ {:.4f}".format(𝑡, Δ𝑡, dt))
+
+    if (its > 5):
+        dt = max(Δ0, decay * dt)
+        print0("  𝑡 = {}: Δ𝑡 = {:.4f} ⤵ {:.4f}".format(𝑡, Δ𝑡, dt))
+
+    return dt
+
 def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, i, 𝜈, τ):
     𝑛 = len(𝛀.coordinates())
     𝐦 = assemble(𝑐 * Δ𝑥) / 𝑊**2
@@ -165,75 +195,62 @@ def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, i, 𝜈, τ):
     𝛈 = assemble(np.abs(𝜇 - 𝜆) / 𝑛 * Δ𝑥)
     𝐢 = COMM.allreduce(i, op=MPI.MAX)
     𝛎 = COMM.allreduce(𝜈, op=MPI.MIN)
-    𝛕 = MPI.Wtime() - τ
+    𝛕 = MPI.Wtime() - τ + Δτ
 
     pid = getpid()
     status = open("/proc/%d/status" % pid).read()
 
-    mem_now = int(status.split("VmSize:")[1].split("kB")[0]) / 1024.
-    mem_max = int(status.split("VmPeak:")[1].split("kB")[0]) / 1024.
+    mem = COMM.allreduce(int(status.split("VmSize:")[1].split("kB")[0])
+                         / 1024.0, op=MPI.SUM)
 
-    mem_now = COMM.allreduce(mem_now, op=MPI.SUM)
-    mem_max = COMM.allreduce(mem_max, op=MPI.SUM)
-
-    return (𝑡, 𝐦, 𝐅, 𝛈, 𝐢, 𝛎, 𝛕, mem_now, mem_max)
+    return (𝑡, Δ𝑡, 𝐦, 𝐅, 𝛈, 𝐢, 𝛎, 𝛕, mem)
 
 
 def guesstimate(rate, t_now, t_nxt):
-    est_nxt = timedelta(seconds=int((viz_t - 𝑡) / (Δ𝑡 * rate)))
-    est_all = timedelta(seconds=int((𝑇 - 𝑡) / (Δ𝑡 * rate)))
+    est_nxt = timedelta(seconds=int((t_nxt - t_now) / (Δ𝑡 * rate)))
+    est_all = timedelta(seconds=int((𝑇 - t_now) / (Δ𝑡 * rate)))
     return (est_nxt, est_all)
-
-
-def print0(s):
-    if rank == 0:
-        print(s)
-
-
-def set_file_params(file):
-    file.parameters["flush_output"] = True
-    file.parameters["rewrite_function_mesh"] = False
-    file.parameters["functions_share_mesh"] = True
 
 
 def write_csv_header(filename):
     if rank == 0:
         with open(filename, mode="w") as nrg_file:
             header = [
-                "time", "composition", "free_energy", "driving_force", "its",
-                "sim_rate", "runtime", "memory", "max_mem"
+                "time", "step", "composition", "free_energy", "driving_force",
+                "its", "sim_rate", "runtime", "memory"
             ]
 
-            try:
-                io = csv.writer(nrg_file)
-                io.writerow(header)
-            except IOError as e:
-                MPI.Abort(e)
+            io = csv.writer(nrg_file)
+            io.writerow(header)
 
 
 def write_csv(filename, summary):
     if rank == 0:
         with open(filename, mode="a") as nrg_file:
+            io = csv.writer(nrg_file)
+            io.writerow(summary)
+
+
+def runtime_offset(filename):
+    rto = 0.0
+    if rank == 0:
+        with open(filename, mode="r") as nrg_file:
             try:
-                io = csv.writer(nrg_file)
-                io.writerow(summary)
+                io = csv.reader(nrg_file)
+                for row in io:
+                    _, _, _, _, _, _, _, rto, _ = row
             except IOError as e:
                 MPI.Abort(e)
+    rto = COMM.bcast(float(rto))
+    return rto
 
 
-def write_viz(xdmf, 𝛀, 𝒖, 𝑡=0.0):
-    try:
-        if np.isclose(0, 𝑡):
-            xdmf.write(𝛀)
-        for n, f in enumerate(𝒖.split()):
-            f.rename(field_names[n], field_names[n])
-            xdmf.write(f, 𝑡)
-            xdmf.close()
-    except IOError as e:
-        MPI.Abort(e)
+def write_viz(viz_file, u, t=0):
+        for n, field in enumerate(u.split()):
+            field.rename(field_names[n], field_names[n])
+            viz_file.write(field, t)
+        viz_file.close()
 
-
-resuming = path.exists(bm1_chk)
 
 # Define domain and finite element
 𝛀 = RectangleMesh(COMM, Point([0, 0]), Point([𝑊, 𝑊]), 𝑁, 𝑁, diagonal="crossed")
@@ -273,18 +290,17 @@ parameters["form_compiler"]["quadrature_degree"] = quad_deg
 
 # === Initial Conditions ===
 
-xdmf = XDMFFile(COMM, bm1_viz)
-set_file_params(xdmf)
-
 if not resuming:
+    viz_file.write(𝛀)
     𝒊 = InitialConditions(degree=poly_deg)
     LagrangeInterpolator.interpolate(𝒖, 𝒊)
     LagrangeInterpolator.interpolate(𝒐, 𝒊)
 
-    write_viz(xdmf, 𝛀, 𝒖)
+    write_viz(viz_file, 𝒖)
 else:
     if resuming:
         print0("Resuming simulation from {}:".format(bm1_chk))
+    Δτ = runtime_offset(bm1_log)
     with HDF5File(COMM, bm1_chk, "r") as chk:
         chk.read(𝒖, "/field")
         chk.read(𝒐, "/field")
@@ -297,25 +313,18 @@ else:
 
 
 # Enqueue output timestamps
-viz_q = queue.Queue()
-nrg_q = queue.Queue()
+io_q = queue.Queue()
 
 for t_out in (1, 2, 5):
     if 𝑡 < t_out:
-        viz_q.put(int(t_out))
-        nrg_q.put(int(t_out))
+        io_q.put(int(t_out))
 for n in np.arange(1, 7):
     step = min(int(10**n), 1000)
     for t_out in np.arange(10**n, 10 * 10**n, step):
         if 𝑡 < t_out and t_out <= 𝑇:
-            viz_q.put(int(t_out))
-            for k in (-1, 0, 1):
-                t_nrg = t_out + k
-                if 𝑡 < t_nrg and t_nrg <= 𝑇:
-                    nrg_q.put(int(t_nrg))
+            io_q.put(int(t_out))
 
-viz_t = viz_q.get()
-nrg_t = nrg_q.get()
+io_t = io_q.get()
 
 # === TIMESTEPPING ===
 
@@ -329,13 +338,14 @@ if not resuming:
     write_csv(bm1_log,
               crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, 0, rate, start))
 
-print0("[{}] Simulation started.".format(
-    timedelta(seconds=int((MPI.Wtime() - epoch)))))
+print0("[{}] Timestepping {}.".format(
+    timedelta(seconds=int((MPI.Wtime() - epoch))),
+    "resumed" if resuming else "started"))
 
-est_t, all_t = guesstimate(rate, 𝑡, viz_t)
+est_t, all_t = guesstimate(rate, 𝑡, io_t)
 print0("[{}] ETA: 𝑡={} in {}, 𝑡={} in {}".format(
     timedelta(seconds=int((MPI.Wtime() - epoch))),
-    viz_t, est_t, 𝑇, all_t))
+    io_t, est_t, 𝑇, all_t))
 
 nits = 0
 itime = MPI.Wtime()
@@ -351,17 +361,14 @@ while (𝑡 < 𝑇):
     if not converged:
         MPI.Abort("Failed to converge!")
 
-    if np.isclose(𝑡, nrg_t) or 𝑡 > nrg_t:
+    if np.isclose(𝑡, io_t) or 𝑡 > io_t:
         # write free energy summary
         rate = float(nits) / (MPI.Wtime() - itime)
         write_csv(bm1_log,
                   crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, its, rate, start))
-
-        if not nrg_q.empty():
-            nrg_t = nrg_q.get()
-
-    if np.isclose(𝑡, viz_t) or 𝑡 > viz_t:
-        write_viz(xdmf, 𝛀, 𝒖, 𝑡)
+        # write visualization slice
+        write_viz(viz_file, 𝒖, 𝑡)
+        # write checkpoint
         with HDF5File(COMM, bm1_chk, "w") as chk:
             chk.write(𝒖, "/field")
 
@@ -369,17 +376,21 @@ while (𝑡 < 𝑇):
             attr["time"] = 𝑡
             attr["timestep"] = Δ𝑡
 
-        if not viz_q.empty():
-            viz_t = viz_q.get()
-            est_t, all_t = guesstimate(rate, 𝑡, viz_t)
+        if not io_q.empty():
+            io_t = io_q.get()
+            est_t, all_t = guesstimate(rate, 𝑡, io_t)
             print0("[{}] ETA: 𝑡={} in {}, 𝑡={} in {}".format(
                 timedelta(seconds=int((MPI.Wtime() - epoch))),
-                viz_t, est_t, 𝑇, all_t))
+                io_t, est_t, 𝑇, all_t))
 
         gc.collect()
         nits = 0
         itime = MPI.Wtime()
 
-xdmf.close()
+    if (𝑡 > 1000) and (nits % 10 == 0):
+        its = COMM.allreduce(its, op=MPI.MAX)
+        Δ𝑡 = adapt_timestep(𝑡, Δ𝑡, its)
+
+viz_file.close()
 print0("[{}] Simulation complete.".format(
     timedelta(seconds=int((MPI.Wtime() - epoch)))))
