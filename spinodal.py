@@ -34,7 +34,7 @@ from dolfin import FiniteElement, FunctionSpace, MixedElement
 from dolfin import Function, TestFunctions, TrialFunction
 from dolfin import LagrangeInterpolator, NewtonSolver, NonlinearProblem
 from dolfin import Mesh, Point, RectangleMesh, UserExpression
-from dolfin import XDMFFile
+from dolfin import HDF5File, XDMFFile
 from dolfin import LogLevel, set_log_level
 from dolfin import cos, derivative, grad, inner, sin, variable
 from dolfin import assemble, parameters, split
@@ -69,7 +69,7 @@ if (len(argv) == 2) and (np.isfinite(int(argv[1]))):
 # Output -- check if there's already data here
 bm1_log = "fenics-bm-1b.csv"
 bm1_viz = "fenics-bm-1b.xdmf"
-bm1_chk = "checkpoint.xdmf"
+bm1_chk = "checkpoint.hdf"
 
 COMM = MPI.COMM_WORLD
 rank = MPI.COMM_WORLD.Get_rank()
@@ -234,8 +234,6 @@ def write_viz(xdmf, 𝛀, 𝒖, 𝑡=0.0):
 
 
 resuming = path.exists(bm1_chk)
-if resuming:
-    print0("Resuming simulation from {}.".format(bm1_chk))
 
 # Define domain and finite element
 𝛀 = RectangleMesh(COMM, Point([0, 0]), Point([𝑊, 𝑊]), 𝑁, 𝑁, diagonal="crossed")
@@ -251,14 +249,6 @@ d𝒖 = TrialFunction(𝕊)
 𝒐 = Function(𝕊)  # old (previous) solution
 𝑐, 𝜇 = split(𝒖)  # references to components of 𝒖 for clear, direct access
 𝑏, 𝜆 = split(𝒐)  # 𝑏, 𝜆 are the previous values for 𝑐, 𝜇
-
-if resuming:
-    with XDMFFile(COMM, bm1_chk) as chk:
-        chk.read_checkpoint(𝒖, "u")
-
-        attr = chk.attributes("u")
-        𝑡 = attr["time"]
-        Δ𝑡 = attr["timestep"]
 
 # === Weak Form ===
 𝐹, 𝐿 = weak_form(𝒖, 𝒐, 𝕊, 𝛀, 𝓟)
@@ -292,6 +282,19 @@ if not resuming:
     LagrangeInterpolator.interpolate(𝒐, 𝒊)
 
     write_viz(xdmf, 𝛀, 𝒖)
+else:
+    if resuming:
+        print0("Resuming simulation from {}:".format(bm1_chk))
+    with HDF5File(COMM, bm1_chk, "r") as chk:
+        chk.read(𝒖, "/field")
+        chk.read(𝒐, "/field")
+
+        attr = chk.attributes("/field")
+        𝑡 = attr["time"]
+        Δ𝑡 = attr["timestep"]
+
+    print0("  𝑡 = {} and Δ𝑡 = {}".format(𝑡, Δ𝑡))
+
 
 # Enqueue output timestamps
 viz_q = queue.Queue()
@@ -319,7 +322,7 @@ nrg_t = nrg_q.get()
 start = MPI.Wtime()
 
 # Guess initial rate based on 4-core CPU
-rate = 0.5 * (𝑁 / 400)**2 * (4.0 / COMM.Get_size())
+rate = 0.5 * (400. / 𝑁)**2 * (4.0 / COMM.Get_size())
 
 if not resuming:
     write_csv_header(bm1_log)
@@ -359,10 +362,10 @@ while (𝑡 < 𝑇):
 
     if np.isclose(𝑡, viz_t) or 𝑡 > viz_t:
         write_viz(xdmf, 𝛀, 𝒖, 𝑡)
-        with XDMFFile(COMM, bm1_chk) as chk:
-            chk.write_checkpoint(𝒖, "u", 𝑡)
+        with HDF5File(COMM, bm1_chk, "w") as chk:
+            chk.write(𝒖, "/field")
 
-            attr = chk.attributes("u")
+            attr = chk.attributes("/field")
             attr["time"] = 𝑡
             attr["timestep"] = Δ𝑡
 
