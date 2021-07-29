@@ -18,7 +18,7 @@ all: spinodal
 .PHONY: all clean format lint shell spinodal start stop watch
 
 spinodal: spinodal.py
-	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py 10000
+	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py 100000
 
 clean:
 	rm -vf *.csv *.h5 *.log *.xdmf

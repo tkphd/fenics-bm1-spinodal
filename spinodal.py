@@ -203,7 +203,7 @@ def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, i, 𝜈, τ):
     mem = COMM.allreduce(int(status.split("VmSize:")[1].split("kB")[0])
                          / 1024.0, op=MPI.SUM)
 
-    return (𝑡, Δ𝑡, 𝐦, 𝐅, 𝛈, 𝐢, 𝛎, 𝛕, mem)
+    return (𝑡, 𝐦, 𝐅, 𝛈, 𝐢, 𝛎, 𝛕, mem)
 
 
 def guesstimate(rate, t_now, t_nxt):
@@ -216,7 +216,7 @@ def write_csv_header(filename):
     if rank == 0:
         with open(filename, mode="w") as nrg_file:
             header = [
-                "time", "step", "composition", "free_energy", "driving_force",
+                "time", "composition", "free_energy", "driving_force",
                 "its", "sim_rate", "runtime", "memory"
             ]
 
@@ -386,10 +386,6 @@ while (𝑡 < 𝑇):
         gc.collect()
         nits = 0
         itime = MPI.Wtime()
-
-    if (𝑡 > 1000) and (nits % 10 == 0):
-        its = COMM.allreduce(its, op=MPI.MAX)
-        Δ𝑡 = adapt_timestep(𝑡, Δ𝑡, its)
 
 viz_file.close()
 print0("[{}] Simulation complete.".format(
