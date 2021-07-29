@@ -349,7 +349,7 @@ io_t = io_q.get()
 start = MPI.Wtime()
 
 # Guess initial rate based on 4-core CPU
-rate = 0.5 * (400. / 𝑁)**2 * (4.0 / COMM.Get_size())
+rate = 0.5 * (400. / 𝑁)**2 * (COMM.Get_size() / 4)
 
 if not resuming:
     write_csv_header(bm1_log)
