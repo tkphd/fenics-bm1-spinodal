@@ -188,6 +188,24 @@ def adapt_timestep(𝑡, Δ𝑡, its):
 
     return dt
 
+
+def timestep(t, dt0):
+    # Generate an multiple of the original timestep
+    x = np.exp((t / 1e6) ** 0.75)
+
+    # Interpolate exp [0, 1] onto timestep [Δ0, 8]
+    x0 = 1.0
+    x1 = np.exp(1)
+    y0 = Δ0
+    y1 = 8.0
+    m = (y1 - y0) / (x1 - x0)
+    y = y0 + m * (x - x0)
+
+    # Alias timestep to multiples of Δ0, and cap at 1.0
+    dt = min(1.0, Δ0 * np.floor(y / Δ0))
+    changed = (not np.isclose(dt, dt0))
+    return dt, changed
+
 def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, i, 𝜈, τ):
     𝑛 = len(𝛀.coordinates())
     𝐦 = assemble(𝑐 * Δ𝑥) / 𝑊**2
@@ -238,7 +256,7 @@ def runtime_offset(filename):
             try:
                 io = csv.reader(nrg_file)
                 for row in io:
-                    _, _, _, _, _, _, _, rto, _ = row
+                    _, _, _, _, _, _, rto, _ = row
             except IOError as e:
                 MPI.Abort(e)
     rto = COMM.bcast(float(rto))
@@ -386,6 +404,11 @@ while (𝑡 < 𝑇):
         gc.collect()
         nits = 0
         itime = MPI.Wtime()
+
+    Δ𝑡, dt_changed = timestep(𝑡, Δ𝑡)
+    if dt_changed:
+        print0("  𝑡 = {}: Δ𝑡 ⤴ {}".format(𝑡, Δ𝑡))
+
 
 viz_file.close()
 print0("[{}] Simulation complete.".format(
