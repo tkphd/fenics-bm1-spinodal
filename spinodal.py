@@ -84,7 +84,6 @@ viz_file.parameters["flush_output"] = True
 viz_file.parameters["rewrite_function_mesh"] = False
 viz_file.parameters["functions_share_mesh"] = True
 
-
 def weak_form(𝒖, 𝒐, ℝ, 𝛀, 𝐸):
     # Define the 𝑐 function based on the real space
     𝑝, 𝑞 = TestFunctions(ℝ)
@@ -190,21 +189,25 @@ def adapt_timestep(𝑡, Δ𝑡, its):
 
 
 def timestep(t, dt0):
-    # Generate an multiple of the original timestep
-    x = np.exp((t / 1e6) ** 0.75)
-
     # Interpolate exp [0, 1] onto timestep [Δ0, 8]
     x0 = 1.0
     x1 = np.exp(1)
+
     y0 = Δ0
     y1 = 8.0
+
     m = (y1 - y0) / (x1 - x0)
+
+    x = np.exp(t / 1e6)
     y = y0 + m * (x - x0)
 
     # Alias timestep to multiples of Δ0, and cap at 1.0
     dt = min(1.0, Δ0 * np.floor(y / Δ0))
     changed = (not np.isclose(dt, dt0))
-    return dt, changed
+
+    if changed:
+        print0("  𝑡 = {}: Δ𝑡 ⤴ {}".format(𝑡, Δ𝑡))
+    return dt
 
 def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, i, 𝜈, τ):
     𝑛 = len(𝛀.coordinates())
@@ -295,8 +298,6 @@ problem = CahnHilliardEquation(𝑱, 𝐿)
 solver = NewtonSolver(COMM)
 
 solver.parameters["linear_solver"] = "lu"
-solver.parameters["relative_tolerance"] = 1e-3
-solver.parameters["absolute_tolerance"] = 1e-7
 solver.parameters["convergence_criterion"] = "incremental"
 solver.parameters["error_on_nonconvergence"] = True
 
@@ -321,7 +322,6 @@ else:
     Δτ = runtime_offset(bm1_log)
     with HDF5File(COMM, bm1_chk, "r") as chk:
         chk.read(𝒖, "/field")
-        chk.read(𝒐, "/field")
 
         attr = chk.attributes("/field")
         𝑡 = attr["time"]
@@ -366,6 +366,7 @@ print0("[{}] ETA: 𝑡={} in {}, 𝑡={} in {}".format(
     io_t, est_t, 𝑇, all_t))
 
 nits = 0
+adapt_t = 10
 itime = MPI.Wtime()
 
 # Main time-stepping loop
@@ -405,9 +406,9 @@ while (𝑡 < 𝑇):
         nits = 0
         itime = MPI.Wtime()
 
-    Δ𝑡, dt_changed = timestep(𝑡, Δ𝑡)
-    if dt_changed:
-        print0("  𝑡 = {}: Δ𝑡 ⤴ {}".format(𝑡, Δ𝑡))
+    if np.isclose(𝑡, adapt_t) or 𝑡 > adapt_t:
+        Δ𝑡 = timestep(𝑡, Δ𝑡)
+        adapt_t += 100
 
 
 viz_file.close()

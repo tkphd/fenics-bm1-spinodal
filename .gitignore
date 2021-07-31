@@ -5,6 +5,7 @@
 *.h5
 *.log
 *.o
+*.png
 *.pvd
 *.pyc
 *.so
