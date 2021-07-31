@@ -221,8 +221,7 @@ def crunch_the_numbers(𝛀, 𝑡, 𝑐, 𝐹, 𝜇, 𝜆, i, 𝜈, τ):
     pid = getpid()
     status = open("/proc/%d/status" % pid).read()
 
-    mem = COMM.allreduce(int(status.split("VmSize:")[1].split("kB")[0])
-                         / 1024.0, op=MPI.SUM)
+    mem = int(status.split("VmSize:")[1].split("kB")[0]) / 1024.0
 
     return (𝑡, 𝐦, 𝐅, 𝛈, 𝐢, 𝛎, 𝛕, mem)
 
