@@ -11,3 +11,6 @@
 *.so
 *.vtu
 *.xdmf
+
+signac.rc
+workspace

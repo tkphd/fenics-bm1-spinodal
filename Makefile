@@ -6,6 +6,7 @@
 MPI = mpirun
 PY3 = python3
 RANKS = 4
+WRK = workspace/cff295345c25cacade5b041b11edb5c6
 
 # Container Settings
 
@@ -15,19 +16,22 @@ NAME = pfhub
 # Make Targets
 
 all: spinodal
-.PHONY: all clean format lint shell spinodal start stop watch
+.PHONY: all clean format lint shell singodal spinodal start stop watch
 
 spinodal: spinodal.py
+	$(MPI) -np $(RANKS) $(PY3) -u spinodal.py 100000
+
+singodal: spinodal.py
 	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py 100000
 
 clean:
-	rm -vf *.csv *.h5 *.log *.xdmf
+	rm -vf $(WRK)/*.csv $(WRK)/*.h5 $(WRK)/*.log $(WRK)/*.xdmf
 
 format: spinodal.py
 	yapf --style=.style.yapf -i $<
 
 lint: spinodal.py
-	pycodestyle --ignore=E128,E402,W503 $<
+	pycodestyle --ignore=E128,E221,E402,W503 $<
 
 list:
 	singularity instance list
