@@ -59,6 +59,8 @@ style.use("seaborn")
 if mpi_root:
     # Register this simulation with Signac
     project = signac.init_project("fenics-cahn-hilliard")
+else:
+    project = None
 
 # Establish "State Point" for this simulation
 
@@ -120,6 +122,8 @@ solver = set_solver("newton", state)
 
 if mpi_root:
     sigjob = project.open_job(state)
+else:
+    project = None
 
 if mpi_root:
     # Model parameters
@@ -365,8 +369,8 @@ def runtime_offset(filename):
 def write_viz(viz_file, u, t=0):
     for n, field in enumerate(u.split()):
         field.rename(field_names[n], field_names[n])
+        viz_file.write(field, t)
 
-    viz_file.write(field, t)
     viz_file.close()
 
 
@@ -517,13 +521,14 @@ print0("[{}] Simulation complete.".format(
 
 # === Plot Energy vs. Sim Time ===
 
-data = pd.read_csv(bm1_log)
+if mpi_root:
+    data = pd.read_csv(bm1_log)
 
-plt.figure(figsize=(10,8))
-plt.title("FEniCS BM1b Free Energy")
-plt.xlabel("Time (a.u.)")
-plt.ylabel(u"Energy Density (J/m³)")
+    plt.figure(figsize=(10,8))
+    plt.title("FEniCS BM1b Free Energy")
+    plt.xlabel("Time (a.u.)")
+    plt.ylabel(u"Energy Density (J/m³)")
 
-plt.semilogx(data["time"], data["free_energy"])
-plt.savefig(sigjob.fn("bm1b-energy.png"), dpi=400, bbox_inches="tight")
-plt.close()
+    plt.semilogx(data["time"], data["free_energy"])
+    plt.savefig(sigjob.fn("bm1b-energy.png"), dpi=400, bbox_inches="tight")
+    plt.close()
