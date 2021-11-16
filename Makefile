@@ -1,49 +1,39 @@
-# GNU Makefile for PFHub BM1
-# Recommended for use with a Conda environment for Singularity with Python 3
+# PFHub BM1 using FEniCS in a container
 
-# Cluster Settings
-
-MPI = mpirun
-PY3 = python3
-RANKS = 4
-WRK = workspace/cff295345c25cacade5b041b11edb5c6
-
-# Container Settings
-
-IMAGE = quay.io/fenicsproject/stable
-NAME = pfhub
-
-# Make Targets
+IMAGE = tkphd/fenics-petsc-signac
+WRK = /root/shared
+NP = 4
 
 all: spinodal
-.PHONY: all clean format lint shell singodal spinodal start stop watch
+.PHONY: all format init lint shell singodal spinodal start stop watch
 
 spinodal: spinodal.py
-	$(MPI) -np $(RANKS) $(PY3) -u spinodal.py 100000
+	mpirun -np $(NP) python3 -u spinodal.py 100000
 
-singodal: spinodal.py
-	singularity exec instance://$(NAME) $(MPI) -np $(RANKS) $(PY3) -u spinodal.py 100000
+init: init.py
+	docker run --rm -ti -v $(PWD):$(WRK) -w $(WRK) $(IMAGE) \
+		python3 init.py
 
-clean:
-	rm -vf $(WRK)/*.csv $(WRK)/*.h5 $(WRK)/*.log $(WRK)/*.xdmf
+# singodal: spinodal.py
+# 	singularity exec instance://pfhub mpirun -np $(NP) python3 -u spinodal.py 100000
 
-format: spinodal.py
-	yapf --style=.style.yapf -i $<
+# format: spinodal.py
+# 	yapf --style=.style.yapf -i $<
 
-lint: spinodal.py
-	pycodestyle --ignore=E128,E221,E402,W503 $<
+# lint: spinodal.py
+# 	pycodestyle --ignore=E128,E221,E402,W503 $<
 
-list:
-	singularity instance list
+# list:
+# 	singularity instance list
 
-shell:
-	singularity exec instance://$(NAME) bash --init-file .singular-prompt
+# shell:
+# 	singularity exec instance://pfhub bash --init-file .singular-prompt
 
-start:
-	singularity instance start -H $(PWD) docker://$(IMAGE) $(NAME)
+# start:
+# 	singularity instance start -H $(PWD) docker://$(IMAGE) pfhub
 
-stop:
-	singularity instance stop $(NAME)
+# stop:
+# 	singularity instance stop pfhub
 
-watch:
-	watch singularity exec instance://$(NAME) "tail -n 40 fenics-bm-1b.csv | column -s, -t"
+# watch:
+# 	watch singularity exec instance://pfhub "tail -n 40 fenics-bm-1b.csv | column -s, -t"

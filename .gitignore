@@ -13,4 +13,7 @@
 *.xdmf
 
 signac.rc
-workspace
+
+bm1b/
+view/
+workspace/
